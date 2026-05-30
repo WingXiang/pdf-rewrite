@@ -1360,7 +1360,7 @@
               if (!res.ok) {
                 if (res.status === 429) {
                   const errorData = await res.json().catch(() => ({}));
-                  throw new Error(errorData.detail || "本日偵測額度已用盡（每日限制 5 次）。請等待隔天 0 點後再試。");
+                  throw new Error(errorData.detail || "本日偵測額度已用盡（每日限制 10 次）。請等待隔天 0 點後再試。");
                 }
                 throw new Error(`重新校對被迫暫停：在檢查第 ${i + 1} 批段落時與 AI 失去了連線，請稍後再試。`);
               }

@@ -28,10 +28,26 @@ app = FastAPI(title="PDF Editor")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_pna_headers(request: Request, call_next):
+    # Support Chrome Private Network Access (PNA)
+    if request.method == "OPTIONS" and request.headers.get("Access-Control-Request-Private-Network") == "true":
+        response = StreamingResponse(iter([]), status_code=204)
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+        
+    response = await call_next(request)
+    if request.headers.get("Origin"):
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 ocr_manager = OCRManager(mode="auto")
 
@@ -325,8 +341,8 @@ async def redetect_errors(request: Request, payload: RedetectRequest):
         IP_RATE_LIMIT = {}
         
     client_ip = request.client.host
-    if IP_RATE_LIMIT.get(client_ip, 0) >= 5:
-        raise HTTPException(status_code=429, detail="本日偵測額度已用盡（每日限制 5 次）。請等待隔天 0 點後再試。")
+    if IP_RATE_LIMIT.get(client_ip, 0) >= 10:
+        raise HTTPException(status_code=429, detail="本日偵測額度已用盡（每日限制 10 次）。請等待隔天 0 點後再試。")
         
     IP_RATE_LIMIT[client_ip] = IP_RATE_LIMIT.get(client_ip, 0) + 1
 
@@ -433,7 +449,7 @@ async def redetect_errors(request: Request, payload: RedetectRequest):
             logger.error(f"Failed to parse LLM response: {parse_err}\\nRaw: {response.text}")
             raise HTTPException(status_code=500, detail="AI 剛剛恍神了，沒有回傳我們預期的格式。請您再點擊一次重新偵測。")
         
-        return {"status": "success", "errors": errors, "remainingLimit": 5 - IP_RATE_LIMIT.get(client_ip, 0)}
+        return {"status": "success", "errors": errors, "remainingLimit": 10 - IP_RATE_LIMIT.get(client_ip, 0)}
 
     except Exception as e:
         logger.error(f"Gemini API call failed: {e}")
