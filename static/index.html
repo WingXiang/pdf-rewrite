@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF 錯誤偵測器</title>
+  <link rel="icon" type="image/png" href="./logo.png">
+  <meta name="description" content="AI 驅動之文件智慧校對系統原型，支援 PDF, DOCX, 影像辨識與即時錯字偵測，提供極致專業之校正體驗。">
+  
+  <!-- Noto Sans TC Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brandPrimary: '#2A4189',
+            brandPrimaryHover: '#1a2e6b',
+            brandPrimaryLight: 'rgba(42, 65, 137, 0.06)',
+            brandPrimaryLightHover: 'rgba(42, 65, 137, 0.12)',
+            brandAccent: '#C67E13',
+            brandAccentHover: '#a0660f',
+            brandAccentLight: 'rgba(198, 126, 19, 0.08)',
+            brandError: '#D32F2F',
+            brandErrorLight: 'rgba(211, 47, 47, 0.08)',
+            brandBg: '#F4F6FA',
+            brandBorder: '#E2E8F0',
+          },
+          fontFamily: {
+            sans: ['"Noto Sans TC"', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+            mono: ['"Outfit"', 'monospace']
+          },
+          boxShadow: {
+            premium: '0 20px 25px -5px rgba(42, 65, 137, 0.03), 0 8px 10px -6px rgba(42, 65, 137, 0.03)',
+            paper: '0 10px 30px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.02)',
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Iconify Icon Component -->
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js" defer></script>
+  
+  <!-- Vue 3 Global CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <style>
+    /* Custom Webkit scrollbar for premium touch */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #CBD5E1;
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94A3B8;
+    }
+    
+    /* Document page transition */
+    .fade-enter-active, .fade-leave-active {
+      transition: opacity 0.25s ease;
+    }
+    .fade-enter-from, .fade-leave-to {
+      opacity: 0;
+    }
+    
+    [v-cloak] {
+      display: none;
+    }
+  </style>
+</head>
+<body class="bg-brandBg text-slate-800 antialiased h-screen overflow-hidden">
+
+  <!-- Vue App Mounting Point -->
+  <div id="app" class="flex flex-col h-screen overflow-hidden" v-cloak>
+    
+    <!-- Top Navigation Header -->
+    <header class="h-16 bg-brandPrimary text-white flex items-center justify-between px-6 shadow-md z-10 shrink-0 select-none">
+      <div class="flex items-center gap-3">
+        <img src="./logo_black.png" alt="Logo" class="w-8 h-8 object-contain brightness-0 invert">
+        <h1 class="text-lg font-semibold tracking-wide bg-gradient-to-r from-white to-slate-200 bg-clip-text text-transparent">PDF 錯誤偵測器</h1>
+      </div>
+      
+      <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full border border-white/10">
+          <span class="w-2.5 h-2.5 bg-brandAccent rounded-full shadow-[0_0_8px_#C67E13] animate-pulse"></span>
+          <span class="text-xs font-medium">後端服務狀態：{{ backendConnected ? '已連接 (FastAPI 託管)' : '離線 (使用本地 Fallback)' }}</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Container -->
+    <main class="flex-1 grid grid-cols-12 overflow-hidden h-[calc(100vh-64px)]">
+      
+      <!-- LEFT COLUMN: Input Panel (25%) -->
+      <section class="col-span-3 border-r border-slate-200 flex flex-col h-full bg-white overflow-hidden">
+        <!-- Section Header -->
+        <div class="p-5 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+          <h2 class="text-base font-semibold text-slate-800 flex items-center gap-2">
+            <iconify-icon icon="lucide:upload-cloud" class="text-brandPrimary text-xl"></iconify-icon>
+            文件輸入區
+          </h2>
+          <span class="text-xs bg-brandPrimaryLight text-brandPrimary px-2.5 py-0.5 rounded-full font-semibold">
+            {{ uploadedFiles.length }} 檔案
+          </span>
+        </div>
+        
+        <!-- Scrollable content -->
+        <div class="flex-1 p-5 overflow-y-auto flex flex-col gap-6">
+          
+          <!-- Drag & Drop Upload Zone -->
+          <div 
+            id="drag-drop-zone"
+            @dragover.prevent="isDragging = true"
+            @dragleave="isDragging = false"
+            @drop.prevent="handleFileDrop"
+            @click="triggerFileSelect"
+            :class="[
+              'border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 flex flex-col items-center gap-3 relative overflow-hidden select-none',
+              isDragging ? 'border-brandPrimary bg-brandPrimaryLight' : 'border-slate-300 hover:border-brandPrimary hover:bg-brandPrimaryLight/50'
+            ]"
+          >
+            <input type="file" ref="fileInput" @change="handleFileSelect" style="display: none;" accept=".pdf,.docx,image/*" multiple>
+            <div class="w-12 h-12 bg-brandPrimaryLight rounded-full flex items-center justify-center text-brandPrimary text-2xl transition-transform duration-200 group-hover:scale-110">
+              <iconify-icon icon="lucide:file-up"></iconify-icon>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-slate-800">拖曳檔案至此或點擊上傳</div>
+              <div class="text-xs text-slate-500 mt-1 leading-relaxed">支援 PDF, DOCX, IMG (圖片)<br>最大支援 50MB</div>
+            </div>
+            <div class="flex gap-1.5 justify-center mt-1">
+              <span class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">.PDF</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">.DOCX</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">.PNG/JPG</span>
+            </div>
+          </div>
+          
+          <!-- Uploaded File List -->
+          <div class="flex flex-col gap-3 flex-1 min-h-[220px]">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">文件清單</div>
+            
+            <div class="flex flex-col gap-3">
+              <div 
+                v-for="file in uploadedFiles" 
+                :key="file.id"
+                @click="selectFile(file)"
+                :class="[
+                  'group border rounded-xl p-4 transition-all duration-200 flex flex-col gap-3 cursor-pointer relative shadow-sm hover:shadow',
+                  file.active ? 'border-brandAccent bg-brandAccentLight/20' : 'border-slate-200 bg-white hover:border-brandPrimary'
+                ]"
+              >
+                <!-- Selection indicator bar -->
+                <div v-if="file.active" class="absolute left-0 top-0 bottom-0 w-1 bg-brandAccent rounded-l-xl"></div>
+                
+                <!-- Cancel / Delete button -->
+                <button v-if="file.status === 'uploading'" @click.stop="cancelUploadTask(file)" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 p-1" title="取消處理">
+                  <iconify-icon icon="lucide:x-circle"></iconify-icon>
+                </button>
+                <button v-else-if="file.status === 'success' || file.status === 'error'" @click.stop="cancelUploadTask(file)" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20" title="刪除檔案">
+                  <iconify-icon icon="lucide:trash-2"></iconify-icon>
+                </button>
+
+                <div class="flex items-start gap-3">
+                  <iconify-icon 
+                    :icon="getFileIcon(file.name)" 
+                    class="text-2xl text-brandPrimary shrink-0 mt-0.5"
+                  ></iconify-icon>
+                  
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-slate-800 truncate" :title="file.name">{{ file.name }}</div>
+                    <div class="flex justify-between text-xs text-slate-500 mt-1">
+                      <span>{{ formatBytes(file.size) }}</span>
+                      <span :class="['font-semibold', getStatusClass(file.status)]">
+                        {{ getStatusLabel(file) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Progress bar for processing state -->
+                <div v-if="file.status === 'uploading'" class="w-full bg-slate-200 rounded-full h-1.5 mt-1 overflow-hidden">
+                  <div class="bg-brandPrimary h-1.5 rounded-full transition-all duration-300" :style="{ width: file.progress + '%' }"></div>
+                </div>
+              </div>
+              
+              <div v-if="uploadedFiles.length === 0" class="text-center py-8 text-sm text-slate-400 border border-dashed rounded-xl bg-slate-50/50">
+                目前沒有任何檔案
+              </div>
+            </div>
+          </div>
+          
+        </div>
+      </section>
+
+
+
+      <!-- MIDDLE COLUMN: Editor Panel (50%) -->
+      <section class="col-span-6 flex flex-col h-full bg-slate-50 overflow-hidden">
+        <!-- Preview Filename Bar -->
+        <div class="px-6 py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
+          <div class="text-sm font-semibold text-brandPrimary flex items-center gap-2">
+            <iconify-icon icon="lucide:file-text" class="text-lg"></iconify-icon>
+            <span>{{ activeFile ? activeFile.name : '暫無預覽檔案' }}</span>
+          </div>
+          
+          <span 
+            :class="[
+              'text-xs px-2.5 py-0.5 rounded-full font-semibold transition-colors duration-200',
+              activeFileErrorsCount > 0 ? 'bg-brandErrorLight text-brandError animate-pulse' : 'bg-green-50 text-green-700 border border-green-200'
+            ]"
+          >
+            {{ activeFileErrorsCount > 0 ? `${activeFileErrorsCount} 處錯誤待修正` : '校對完畢 (已解鎖匯出)' }}
+          </span>
+        </div>
+        
+        <!-- Editor Toolbar -->
+        <div v-if="activeFile" class="bg-slate-100 border-b border-slate-200 px-6 py-2.5 flex items-center justify-between shrink-0 select-none">
+          <div class="flex items-center gap-4">
+            <!-- Mode Toggle Switch -->
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-slate-500">編輯模式</span>
+              <div class="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium border bg-brandAccent/10 text-brandAccent border-brandAccent/20">
+                <iconify-icon icon="lucide:mouse-pointer-click" class="text-sm"></iconify-icon>
+                點擊任一段落即可修改
+              </div>
+            </div>
+            
+            <span v-if="isEditMode" class="text-[11px] text-brandAccent font-medium animate-pulse">
+              💡 點擊編輯區文字即可自由修改內容，修改後會自動儲存。
+            </span>
+          </div>
+          
+          <div class="flex items-center gap-2">
+            <!-- Slide Overview Toggle -->
+            <button 
+              @click="slideOverview = !slideOverview"
+              :class="['flex items-center gap-1.5 py-1 px-3 border text-xs font-semibold rounded-lg shadow-sm active:scale-[0.98] transition-all duration-150', slideOverview ? 'bg-brandPrimary text-white border-brandPrimary' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700']"
+              title="切換投影片瀏覽模式"
+            >
+              <iconify-icon icon="lucide:layout-grid"></iconify-icon>
+              <span>{{ slideOverview ? '返回編輯' : '多頁瀏覽' }}</span>
+            </button>
+
+            <!-- Redetect Buttons Group -->
+            <div class="flex items-center gap-2">
+              <button 
+                @click="triggerRedetect('typo')"
+                :disabled="isRedetecting !== false"
+                class="flex items-center gap-1.5 py-1 px-3 border border-slate-200 text-xs font-semibold rounded-lg shadow-sm transition-all duration-150"
+                :class="isRedetecting !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white hover:bg-slate-50 text-slate-700 active:scale-[0.98]'"
+                title="純粹抓錯別字，不抓語意不順"
+              >
+                <iconify-icon v-if="isRedetecting === 'typo'" icon="lucide:loader-2" class="animate-spin text-brandPrimary"></iconify-icon>
+                <iconify-icon v-else icon="lucide:spell-check" class="text-brandPrimary"></iconify-icon>
+                <span>{{ isRedetecting === 'typo' ? `抓錯字 (${redetectProgress}/${redetectTotal})` : '偵測錯字' }}</span>
+              </button>
+
+              <button 
+                @click="triggerRedetect('grammar')"
+                :disabled="isRedetecting !== false"
+                class="flex items-center gap-1.5 py-1 px-3 border border-slate-200 text-xs font-semibold rounded-lg shadow-sm transition-all duration-150"
+                :class="isRedetecting !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white hover:bg-slate-50 text-slate-700 active:scale-[0.98]'"
+                title="純粹偵測語法不順與贅字"
+              >
+                <iconify-icon v-if="isRedetecting === 'grammar'" icon="lucide:loader-2" class="animate-spin text-amber-500"></iconify-icon>
+                <iconify-icon v-else icon="lucide:message-square-dashed" class="text-amber-500"></iconify-icon>
+                <span>{{ isRedetecting === 'grammar' ? `修語法 (${redetectProgress}/${redetectTotal})` : '偵測語法不順' }}</span>
+              </button>
+
+              <button 
+                v-if="isRedetecting !== false"
+                @click="cancelRedetect"
+                class="flex items-center gap-1.5 py-1 px-3 border border-red-200 text-xs font-semibold rounded-lg shadow-sm transition-all duration-150 bg-red-50 text-red-600 hover:bg-red-100 active:scale-[0.98]"
+                title="立即中斷偵測程序"
+              >
+                <iconify-icon icon="lucide:x-circle"></iconify-icon>
+                <span>中斷偵測</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Main Workspace: Sidebar + Editor -->
+        <div class="flex-1 flex overflow-hidden relative">
+          <!-- Editor Wrapper Canvas -->
+          <div class="flex-1 p-8 overflow-y-auto flex flex-col items-center bg-slate-200/50 relative scroll-smooth" id="editor-scroll-area" @scroll="onEditorScroll">
+            
+            <transition name="fade" mode="out-in">
+              <!-- ===== Slide Overview Mode ===== -->
+              <div v-if="activeFile && slideOverview" :key="activeFile.id + '-overview'" class="w-full max-w-[1200px] mx-auto pb-16 px-6 pt-6">
+                <div v-if="groupedPages.length === 0" class="text-center py-20 text-slate-400">
+                  這份文件沒有提取到任何文字或段落，請確認檔案格式是否受支援。
+                </div>
+                <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-10">
+                  <div 
+                    v-for="page in groupedPages" 
+                    :key="'overview-' + page.pageNumber"
+                  @click="handleOverviewClick(page.pageNumber)"
+                  class="flex flex-col cursor-pointer group relative"
+                >
+                  <!-- Thumbnail Image -->
+                  <div 
+                    class="w-full aspect-[1/1.414] relative overflow-hidden bg-[#e9e9e9] shadow-sm transition-all duration-200 group-hover:shadow-md border"
+                    :class="page.paragraphs.some(p => p.hasError) ? 'border-brandError ring-2 ring-brandError ring-offset-2' : 'border-slate-200'"
+                  >
+                    <img :src="getApiUrl('/static/extracted_images/thumb_' + activeFile.id + '_p' + page.pageNumber + '.jpg')" class="w-full h-full object-cover" @error="(e) => e.target.style.display='none'" />
+                  </div>
+                  <!-- Page Number Footer -->
+                  <div class="mt-2 text-[15px] font-medium text-slate-500 pl-1">
+                    {{ page.pageNumber }}
+                  </div>
+                  <div v-if="page.paragraphs.some(p => p.hasError)" class="absolute -top-3 -right-3 bg-brandError text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm z-10">
+                    錯誤
+                  </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ===== Normal Edit Mode ===== -->
+              <div v-else-if="activeFile" :key="activeFile.id" class="w-full max-w-[800px] flex flex-col gap-10 pb-32">
+                <div v-if="groupedPages.length === 0" class="w-full bg-white shadow-sm border border-slate-200 p-12 text-center text-slate-400 rounded-xl">
+                  這份文件沒有提取到任何文字或段落，請確認檔案格式是否受支援。
+                </div>
+                <!-- Loop Pages -->
+                <div 
+                  v-for="page in groupedPages" 
+                  :key="'page-' + page.pageNumber"
+                  :id="'page-' + page.pageNumber"
+                  class="page-card w-full min-h-[1131px] bg-white shadow-md border border-slate-300 p-12 relative flex flex-col select-text"
+                  @mouseover="onCanvasMouseOver"
+                  @mouseout="onCanvasMouseOut"
+                  @click="onCanvasClick"
+                >
+                  <!-- Document Content Rendered via helper -->
+                  <div class="flex flex-col gap-6 text-justify leading-loose text-[16px] text-slate-700">
+                    <!-- Loop blocks/paragraphs -->
+                    <div 
+                      v-for="para in page.paragraphs" 
+                  :key="para.id"
+                  class="relative group rounded transition-colors duration-150"
+                >
+                  <!-- Text paragraphs -->
+                  <div v-if="!para.type || para.type === 'text'">
+                    <!-- 編輯模式：TextArea -->
+                    <textarea
+                      v-if="para.isEditing"
+                      v-model="para.rawText"
+                      @blur="finishEditing(para)"
+                      ref="editBox"
+                      class="w-full min-h-[100px] p-3 rounded-lg border-2 border-brandAccent outline-none focus:ring-4 focus:ring-brandAccent/20 transition-all text-[16px] text-slate-700 leading-loose resize-y bg-white shadow-sm"
+                    ></textarea>
+                    
+                    <!-- 閱讀模式：顯示高亮文字 -->
+                    <p 
+                      v-else
+                      @click="startEditing(para, $event)"
+                      class="p-1.5 rounded outline-none transition-all duration-150 hover:bg-slate-50 cursor-text"
+                      v-html="getParagraphHTML(para)"
+                    ></p>
+                  </div>
+                  
+                  <!-- Image paragraphs -->
+                  <div 
+                    v-else-if="para.type === 'image'"
+                    class="p-4 my-2 flex flex-col items-center gap-3 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 hover:border-brandPrimary transition-all duration-200"
+                  >
+                    <img 
+                      :src="para.imageUrl" 
+                      :style="{ maxWidth: '100%', maxHeight: '420px' }"
+                      class="rounded-xl shadow-md border border-slate-200"
+                    >
+                    <div class="text-[11px] text-slate-400 font-mono flex items-center justify-between w-full px-2 mt-1 select-none">
+                      <span class="flex items-center gap-1.5">
+                        <iconify-icon icon="lucide:image" class="text-brandPrimary"></iconify-icon>
+                        圖片元件 [ID: {{ para.id }}]
+                      </span>
+                      <button 
+                        @click="deleteParagraph(para.id)"
+                        class="text-brandError hover:text-red-700 font-semibold flex items-center gap-0.5 hover:underline"
+                        title="從文件中刪除此圖片"
+                      >
+                        <iconify-icon icon="lucide:trash-2" class="text-xs"></iconify-icon>
+                        刪除圖片
+                      </button>
+                    </div>
+                    
+                    <!-- 圖片內提取之文字專屬編輯框 -->
+                    <div v-if="para.rawText !== undefined" class="w-full mt-2 border-t border-slate-200 pt-3">
+                      <div class="text-xs font-semibold text-brandAccent mb-2 flex items-center gap-1">
+                        <iconify-icon icon="lucide:type"></iconify-icon>
+                        自圖片提取的文字
+                      </div>
+                      <p 
+                        v-if="!para.isEditing"
+                        @click="startEditing(para, $event)"
+                        class="p-2 min-h-[40px] text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded hover:border-slate-300 hover:bg-white cursor-text transition-colors"
+                        v-html="getParagraphHTML(para)"
+                      ></p>
+                      <textarea
+                        v-else
+                        v-model="para.rawText"
+                        @blur="finishEditing(para)"
+                        class="w-full min-h-[60px] p-2.5 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-brandAccent/30 focus:border-brandAccent transition-all text-sm text-slate-700 bg-white resize-y"
+                        placeholder="圖片內無文字或文字無法辨識..."
+                      ></textarea>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              </div>
+            </div>
+
+            <!-- Empty State -->
+            <div v-else class="flex flex-col items-center justify-center text-slate-400 gap-4 py-32 w-full">
+              <iconify-icon icon="lucide:file-search" class="text-6xl text-slate-300"></iconify-icon>
+              <div class="text-sm text-slate-500">請在左側選擇或上傳檔案，以進行智慧校對預覽</div>
+            </div>
+          </transition>
+        </div>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: Export & Change Logs (25%) -->
+      <section class="col-span-3 border-l border-slate-200 flex flex-col h-full bg-white overflow-hidden">
+        <!-- Section Header (Collapsible) -->
+        <div 
+          @click="changeLogsCollapsed = !changeLogsCollapsed"
+          class="p-5 border-b border-slate-100 shrink-0 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors duration-150 select-none bg-white"
+        >
+          <h2 class="text-base font-semibold text-slate-800 flex items-center gap-2">
+            <iconify-icon icon="lucide:history" class="text-brandPrimary text-xl"></iconify-icon>
+            校對紀錄與異動
+          </h2>
+          <iconify-icon 
+            :icon="changeLogsCollapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'" 
+            class="text-slate-400 text-lg transition-transform duration-200"
+          ></iconify-icon>
+        </div>
+        
+        <!-- Changelogs Timeline list (Collapsible with v-show) -->
+        <div v-show="!changeLogsCollapsed" class="flex-1 p-5 overflow-y-auto bg-slate-50 flex flex-col gap-4 transition-all duration-200">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">異動記錄明細</div>
+          
+          <div class="relative flex-1" v-if="changeLogs.length > 0">
+            <!-- Timeline vertical line -->
+            <div class="absolute left-4 top-2 bottom-2 w-0.5 bg-slate-200"></div>
+            
+            <!-- Timeline items -->
+            <div class="flex flex-col gap-5 relative">
+              <div 
+                v-for="log in changeLogsFiltered" 
+                :key="log.id" 
+                class="flex gap-4 relative animate-[fadeIn_0.3s_ease]"
+              >
+                <!-- Bullet point marker -->
+                <div 
+                  :class="[
+                    'w-3.5 h-3.5 rounded-full bg-white border-4 z-10 shrink-0 mt-1',
+                    log.type === 'accept' ? 'border-brandAccent' : 
+                    log.type === 'ignore' ? 'border-brandError' : 'border-brandPrimary'
+                  ]"
+                ></div>
+                
+                <!-- Log content card -->
+                <div class="flex-1 bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-col gap-1.5">
+                  <div class="flex justify-between items-center text-[10px] text-slate-500">
+                    <span class="font-mono">{{ log.time }}</span>
+                    <span 
+                      :class="[
+                        'font-bold uppercase tracking-wider',
+                        log.type === 'accept' ? 'text-brandAccent' : 
+                        log.type === 'ignore' ? 'text-brandError' : 'text-brandPrimary'
+                      ]"
+                    >
+                      {{ getLogTypeLabel(log.type) }}
+                    </span>
+                  </div>
+                  <div class="text-xs leading-relaxed text-slate-700 font-medium">{{ log.description }}</div>
+                  
+                  <!-- Compare Box showing original vs corrected text -->
+                  <div v-if="log.original" class="mt-1 bg-slate-50 p-1.5 rounded text-[10px] text-slate-500 border border-slate-100 flex items-center gap-1.5">
+                    <span class="line-through text-red-500 font-medium">{{ log.original }}</span>
+                    <span>➔</span>
+                    <span class="text-brandAccent font-bold">{{ log.corrected }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Empty State Logs -->
+          <div v-else class="flex flex-col items-center justify-center text-slate-400 gap-3 py-16 flex-1">
+            <iconify-icon icon="lucide:scroll-text" class="text-4xl text-slate-300"></iconify-icon>
+            <div class="text-xs">尚無校對修改紀錄</div>
+          </div>
+        </div>
+        
+        <!-- Fixed bottom operations panel -->
+        <div class="p-5 border-t border-slate-200 flex flex-col gap-3 bg-white shrink-0">
+          <button 
+            @click="correctAllTypos"
+            class="flex items-center justify-center gap-2 py-3 px-4 bg-brandPrimary text-white text-sm font-semibold rounded-xl hover:bg-brandPrimaryHover shadow-md shadow-blue-800/10 active:scale-[0.98] transition-all duration-150"
+            id="btn-auto-correct"
+          >
+            <iconify-icon icon="lucide:sparkles" class="text-base"></iconify-icon>
+            一鍵修正全部錯字
+          </button>
+          <!-- Direct Export Buttons -->
+          <div class="flex gap-2 w-full mt-2">
+            <button 
+              @click="activeFileErrorsCount === 0 && triggerExport('docx')"
+              :class="[
+                'flex-1 flex items-center justify-center gap-2 py-3 px-2 text-sm font-semibold rounded-xl border transition-all duration-150',
+                activeFileErrorsCount > 0 
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60' 
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200 active:scale-[0.98] cursor-pointer'
+              ]"
+              :title="activeFileErrorsCount > 0 ? '請修正所有錯字以解除鎖定' : '匯出為 Word'"
+            >
+              <iconify-icon :icon="activeFileErrorsCount > 0 ? 'lucide:lock' : 'simple-icons:microsoftword'" :class="activeFileErrorsCount === 0 ? 'text-blue-600' : ''" class="text-base"></iconify-icon>
+              <span>匯出 Word</span>
+            </button>
+            <button 
+              @click="activeFileErrorsCount === 0 && triggerExport('pdf')"
+              :class="[
+                'flex-1 flex items-center justify-center gap-2 py-3 px-2 text-sm font-semibold rounded-xl border transition-all duration-150',
+                activeFileErrorsCount > 0 
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60' 
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200 active:scale-[0.98] cursor-pointer'
+              ]"
+              :title="activeFileErrorsCount > 0 ? '請修正所有錯字以解除鎖定' : '匯出為 PDF'"
+            >
+              <iconify-icon :icon="activeFileErrorsCount > 0 ? 'lucide:lock' : 'simple-icons:adobeacrobatreader'" :class="activeFileErrorsCount === 0 ? 'text-red-500' : ''" class="text-base"></iconify-icon>
+              <span>匯出 PDF</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- FLOATING COMPONENT: Typo Hover Popover -->
+    <div 
+      v-if="tooltipVisible && hoveredError" 
+      :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
+      class="absolute z-[999] w-[300px] bg-white border border-slate-200 rounded-2xl shadow-xl p-5 flex flex-col gap-4 text-slate-800 transition-all duration-150 select-none border border-slate-200"
+      @mouseenter="clearHideTimer"
+      @mouseleave="startHideTimer"
+      id="global-tooltip"
+    >
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+        <div class="flex items-center gap-1.5 text-brandPrimary font-semibold text-xs">
+          <iconify-icon icon="lucide:info" class="text-sm"></iconify-icon>
+          智慧校對偵測
+        </div>
+        <span class="text-[10px] bg-brandErrorLight text-brandError border border-brandError/20 px-2 py-0.5 rounded-full font-bold">疑似錯字</span>
+      </div>
+      
+      <div class="flex flex-col gap-3">
+        <div class="flex items-center gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100 justify-center">
+          <span class="text-brandError line-through font-bold text-sm bg-red-50 px-1 py-0.5 rounded">{{ hoveredError.wrongWord }}</span>
+          <span class="text-slate-400 text-xs">➔</span>
+          <span class="text-brandAccent font-bold text-sm bg-amber-50 px-1 py-0.5 rounded">{{ hoveredError.suggestedWord }}</span>
+        </div>
+        <div class="text-[12px] leading-relaxed text-slate-600">{{ hoveredError.reason }}</div>
+      </div>
+      
+      <!-- Action buttons inside popover -->
+      <div class="flex gap-2 pt-1">
+        <button 
+          @click="correctTypo(hoveredError.id)"
+          class="flex-1 py-2 px-3 bg-brandPrimary text-white text-xs font-semibold rounded-lg hover:bg-brandPrimaryHover flex items-center justify-center gap-1 active:scale-[0.97] transition-all duration-150"
+        >
+          <iconify-icon icon="lucide:check" class="text-xs"></iconify-icon>
+          採用建議
+        </button>
+        <button 
+          @click="ignoreTypo(hoveredError.id)"
+          class="flex-1 py-2 px-3 bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 active:scale-[0.97] transition-all duration-150"
+        >
+          <iconify-icon icon="lucide:eye-off" class="text-xs"></iconify-icon>
+          忽略
+        </button>
+      </div>
+    </div>
+
+    <!-- TOAST ALERTS: Bottom Right Notifications -->
+    <div class="fixed bottom-6 right-6 z-[1000] flex flex-col gap-3 select-none">
+      <transition-group name="fade">
+        <div 
+          v-for="toast in toasts" 
+          :key="toast.id" 
+          :class="[
+            'px-5 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2.5 max-w-sm border-l-4 animate-[slideInRight_0.25s_cubic-bezier(0.4,0,0.2,1)] bg-slate-900 text-white',
+            toast.type === 'success' ? 'border-brandAccent' : 
+            toast.type === 'error' ? 'border-brandError' : 'border-brandPrimary'
+          ]"
+        >
+          <iconify-icon 
+            :icon="toast.type === 'success' ? 'lucide:check-circle-2' : toast.type === 'error' ? 'lucide:alert-circle' : 'lucide:info'" 
+            class="text-lg shrink-0"
+          ></iconify-icon>
+          <span>{{ toast.message }}</span>
+        </div>
+      </transition-group>
+    </div>
+
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        // --- 1. Reactive States ---
+        const backendConnected = ref(false);
+        const uploadedFiles = ref([]);
+
+        const changeLogs = ref([]);
+
+        const isDragging = ref(false);
+        const fileInput = ref(null);
+        
+        // Tooltip State
+        const hoveredError = ref(null);
+        const tooltipVisible = ref(false);
+        const tooltipX = ref(0);
+        const tooltipY = ref(0);
+        let hideTimer = null;
+
+        const exportDropdownVisible = ref(false);
+        const toasts = ref([]);
+        const isEditMode = ref(false);
+        const changeLogsCollapsed = ref(false);
+        const slideOverview = ref(false);
+        const isRedetecting = ref(false);
+        const redetectProgress = ref(0);
+        const redetectTotal = ref(0);
+        let redetectAbortController = null;
+        // --- 2. Computed Properties & Pagination ---
+        const activeFile = computed(() => uploadedFiles.value.find(f => f.active));
+        
+        const groupedPages = computed(() => {
+          if (!activeFile.value) return [];
+          const paras = activeFile.value.documentContent.paragraphs;
+          if (paras.length === 0) return [];
+          const maxPage = Math.max(...paras.map(p => p.pageNumber || 1));
+          const pages = [];
+          for(let i=1; i<=maxPage; i++) {
+            pages.push({
+              pageNumber: i,
+              paragraphs: paras.filter(p => (p.pageNumber || 1) === i)
+            });
+          }
+          return pages;
+        });
+
+        const currentPage = ref(1);
+        
+        const scrollToPage = (pageNum) => {
+          const el = document.getElementById('page-' + pageNum);
+          const container = document.getElementById('editor-scroll-area');
+          if (el && container) {
+            container.scrollTo({ top: el.offsetTop - 30, behavior: 'smooth' });
+          }
+        };
+
+        const handleOverviewClick = (pageNum) => {
+          slideOverview.value = false;
+          const tryScroll = (attempts = 0) => {
+            const el = document.getElementById('page-' + pageNum);
+            if (el) {
+              scrollToPage(pageNum);
+            } else if (attempts < 20) {
+              setTimeout(() => tryScroll(attempts + 1), 50);
+            }
+          };
+          tryScroll();
+        };
+        
+        const onEditorScroll = (e) => {
+          const container = e.target;
+          const pages = document.querySelectorAll('.page-card');
+          let current = 1;
+          for (const page of pages) {
+            if (container.scrollTop >= page.offsetTop - 300) {
+              const idStr = page.id.split('-')[1];
+              current = parseInt(idStr, 10);
+            }
+          }
+          currentPage.value = current;
+        };
+        const activeFileErrorsCount = computed(() => {
+          if (!activeFile.value) return 0;
+          return activeFile.value.documentContent.errors.length;
+        });
+
+        const changeLogsFiltered = computed(() => {
+          return [...changeLogs.value].reverse();
+        });
+
+        // --- 3. URL Router Helper ---
+        // 動態計算對接 API 的位址
+        const getApiUrl = (endpoint) => {
+          if (window.location.protocol === 'file:') {
+            return `http://127.0.0.1:8080${endpoint}`;
+          }
+          // 在 Docker 或整合託管環境下使用相對路徑
+          return endpoint;
+        };
+
+        const formatBytes = (bytes, decimals = 2) => {
+          if (bytes === 0) return '0 Bytes';
+          const k = 1024;
+          const dm = decimals < 0 ? 0 : decimals;
+          const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        };
+
+        // --- 4. Toast Helpers ---
+        const showToast = (message, type = 'info') => {
+          const id = Date.now() + Math.random().toString(36).substr(2, 5);
+          toasts.value.push({ id, message, type });
+          setTimeout(() => {
+            toasts.value = toasts.value.filter(t => t.id !== id);
+          }, 3500);
+        };
+
+        // --- 5. Log helper ---
+        const addLogEntry = (type, description, original = null, corrected = null) => {
+          const now = new Date();
+          const timeStr = now.toTimeString().split(' ')[0];
+          changeLogs.value.push({
+            id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            time: timeStr,
+            type,
+            description,
+            original,
+            corrected
+          });
+        };
+
+        // --- 6. Backend connection check ---
+        const checkBackendConnection = async () => {
+          try {
+            const res = await fetch(getApiUrl('/health'));
+            if (res.ok) {
+              backendConnected.value = true;
+            } else {
+              backendConnected.value = false;
+            }
+          } catch {
+            backendConnected.value = false;
+          }
+        };
+
+        // --- 7. File Upload (Background Task & Polling) ---
+        const triggerFileSelect = () => {
+          fileInput.value.click();
+        };
+
+        const handleFileSelect = (event) => {
+          if (event.target.files.length > 0) {
+            Array.from(event.target.files).forEach(file => {
+              if (file.size > 50 * 1024 * 1024) {
+                showToast(`這份檔案太大了（超過 50MB）。為了確保系統順暢，請幫忙將檔案縮小或分拆後再上傳喔！`, 'error');
+                return;
+              }
+              uploadFileToServer(file);
+            });
+          }
+          event.target.value = ''; // clear input
+        };
+
+        const handleFileDrop = (event) => {
+          isDragging.value = false;
+          if (event.dataTransfer.files.length > 0) {
+            Array.from(event.dataTransfer.files).forEach(file => {
+              if (file.size > 50 * 1024 * 1024) {
+                showToast(`這份檔案太大了（超過 50MB）。為了確保系統順暢，請幫忙將檔案縮小或分拆後再上傳喔！`, 'error');
+                return;
+              }
+              uploadFileToServer(file);
+            });
+          }
+        };
+
+        const uploadFileToServer = async (file) => {
+          const tempFileId = `temp-${Date.now()}`;
+          const newFileObj = {
+            id: tempFileId,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            progress: 5,
+            status: 'uploading',
+            active: false,
+            timeoutWarning: false,
+            cancelRequested: false,
+            startTime: Date.now(),
+            appliedCorrections: [],
+            documentContent: { fileName: file.name, paragraphs: [], errors: [] }
+          };
+
+          uploadedFiles.value.push(newFileObj);
+          showToast(`檔案「${file.name}」開始傳送...`, 'info');
+          addLogEntry('edit', `開始傳送文件「${file.name}」。`);
+
+          const formData = new FormData();
+          formData.append('file', file);
+
+          try {
+            const uploadUrl = getApiUrl('/api/upload');
+            const res = await fetch(uploadUrl, {
+              method: 'POST',
+              body: formData
+            });
+
+            if (!res.ok) throw new Error(`檔案上傳中斷了。請確認您的網路連線是否正常，或稍後再試一次。`);
+            const data = await res.json();
+            
+            // 後端解析回傳 taskId，啟動非同步進度輪詢 (Polling)
+            const taskId = data.taskId;
+            
+            const target = uploadedFiles.value.find(f => f.id === tempFileId);
+            if (target) {
+              target.id = taskId; // 更換為真實任務 taskId
+              target.progress = 15;
+              
+              startPollingTask(taskId, target, file.name);
+            }
+          } catch (err) {
+            console.error("API Upload failed. Fallback to local offline mock uploading.", err);
+            simulateOfflineUpload(file, tempFileId);
+          }
+        };
+
+        // 啟動背景分析輪詢
+        const startPollingTask = (taskId, fileObj, originalName) => {
+          showToast(`檔案傳送成功，開始進行背景 OCR 與版面辨識...`, 'info');
+          addLogEntry('edit', `檔案已交由後端 BackgroundTasks 佇列處理。任務 ID: ${taskId}`);
+
+          const pollInterval = setInterval(async () => {
+            if (fileObj.cancelRequested) {
+              clearInterval(pollInterval);
+              return;
+            }
+            if (Date.now() - fileObj.startTime > 45000 && fileObj.status === 'uploading' && !fileObj.timeoutWarning) {
+              fileObj.timeoutWarning = true;
+              showToast(`「${originalName}」處理時間較長，您可選擇繼續等待或取消。`, 'warning');
+            }
+            
+            try {
+              const statusUrl = getApiUrl(`/api/task/${taskId}`);
+              const statusRes = await fetch(statusUrl);
+              if (!statusRes.ok) throw new Error("目前無法更新處理進度，請檢查網路是否穩定。");
+              
+              const statusData = await statusRes.json();
+              
+              // 1. 更新輪詢進度
+              fileObj.progress = statusData.progress;
+              
+              // 2. 處理成功完成
+              if (statusData.status === 'success') {
+                clearInterval(pollInterval);
+                fileObj.status = 'success';
+                fileObj.progress = 100;
+
+                const result = statusData.result;
+                const paragraphs = result.paragraphs || [];
+                const errors = result.errors || [];
+
+                // Assign pageNumber for paragraphs that may need it
+                paragraphs.forEach(p => {
+                  if (!p.pageNumber) p.pageNumber = 1;
+                });
+
+                fileObj.documentContent = {
+                  fileName: originalName,
+                  paragraphs,
+                  errors
+                };
+
+                uploadedFiles.value.forEach(f => f.active = (f.id === taskId));
+                const textCount = paragraphs.filter(p => p.type !== 'image').length;
+                const imgCount = paragraphs.filter(p => p.type === 'image').length;
+                const limitMsg = imgCount > 10 ? " (為求速度，超過 10 頁之圖片僅供預覽，未進行 OCR)" : "";
+                showToast(`「${originalName}」OCR 解析完成！提取 ${textCount} 個文字區塊、${imgCount} 張圖片${limitMsg}。正在呼叫 AI 偵測錯字...`, 'success');
+                addLogEntry('edit', `文件「${originalName}」OCR 解析完成，${textCount} 文字區塊 / ${imgCount} 張圖片。`);
+
+                // 自動偵測已被取消，等待使用者按下「偵測錯字」或「偵測語法不順」按鈕
+                // setTimeout(() => { triggerRedetect(); }, 500);
+
+                
+              // 3. 處理失敗
+              } else if (statusData.status === 'error') {
+                clearInterval(pollInterval);
+                fileObj.status = 'error';
+                showToast(`抱歉！我們無法順利讀取「${originalName}」的內容。可能是檔案受到密碼保護，或是包含了目前尚不支援的特殊格式。`, 'error');
+                addLogEntry('ignore', `檔案「${originalName}」解析失敗。原因：${statusData.error_detail || '未知錯誤'}`);
+              }
+            } catch (err) {
+              console.error("Polling error: ", err);
+            }
+          }, 800);
+        };
+
+        // 本地模擬離線解析 (後端不可用時的 fallback)
+        const simulateOfflineUpload = (file, tempFileId) => {
+          const target = uploadedFiles.value.find(f => f.id === tempFileId);
+          if (!target) return;
+          
+          target.status = 'error';
+          target.progress = 0;
+          showToast(`系統主機目前沒有回應，因此暫時無法處理這份檔案。可能是網路不穩或主機正在休息，請稍後再試。`, 'error');
+          addLogEntry('ignore', `檔案「${file.name}」上傳失敗，後端離線。`);
+        };
+
+        const selectFile = (file) => {
+          if (file.status !== 'success') {
+            showToast(`檔案「${file.name}」仍在處理中。`, 'info');
+            return;
+          }
+          uploadedFiles.value.forEach(f => f.active = (f.id === file.id));
+          addLogEntry('edit', `切換預覽文件至「${file.name}」。`);
+        };
+
+        // --- 8. Formatting & Renderers ---
+        const getFileIcon = (filename) => {
+          if (filename.endsWith('.pdf')) return 'lucide:file-type-2';
+          if (filename.endsWith('.docx') || filename.endsWith('.doc')) return 'lucide:file-edit';
+          return 'lucide:file-image';
+        };
+
+        const getStatusClass = (status) => {
+          if (status === 'uploading') return 'text-brandPrimary';
+          if (status === 'success') return 'text-brandAccent';
+          return 'text-brandError';
+        };
+
+        const getStatusLabel = (file) => {
+          if (file.status === 'uploading') return `解析中 ${file.progress}%`;
+          if (file.status === 'success') return '已完成';
+          return '失敗';
+        };
+
+        const getLogTypeLabel = (type) => {
+          if (type === 'accept') return '修正';
+          if (type === 'ignore') return '忽略';
+          return '異動';
+        };
+
+        const getParagraphHTML = (paragraph) => {
+          if (!activeFile.value) return '';
+          
+          const doc = activeFile.value.documentContent;
+          const paraErrors = doc.errors.filter(e => e.paragraphId === paragraph.id);
+          
+          if (paraErrors.length === 0) {
+            return escapeHTML(paragraph.rawText);
+          }
+          
+          const sortedErrors = [...paraErrors].sort((a, b) => a.startIndex - b.startIndex);
+          let html = '';
+          let lastIndex = 0;
+          
+          sortedErrors.forEach(err => {
+            html += escapeHTML(paragraph.rawText.substring(lastIndex, err.startIndex));
+            html += `<span 
+              class="typo-error text-brandError font-bold underline decoration-brandError decoration-2 underline-offset-4 cursor-help bg-red-50/50 px-1 rounded transition duration-200" 
+              data-error-id="${err.id}"
+            >${escapeHTML(err.wrongWord)}</span>`;
+            lastIndex = err.endIndex;
+          });
+          
+          html += escapeHTML(paragraph.rawText.substring(lastIndex));
+          return html;
+        };
+
+        const escapeHTML = (text) => {
+          const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+          };
+          return text.replace(/[&<>"']/g, m => map[m]);
+        };
+
+        // --- 9. Event Delegation ---
+        const onCanvasMouseOver = (event) => {
+          const target = event.target.closest('.typo-error');
+          if (target) {
+            clearHideTimer();
+            const errorId = target.getAttribute('data-error-id');
+            const error = activeFile.value.documentContent.errors.find(e => e.id === errorId);
+            if (error) {
+              hoveredError.value = error;
+              tooltipVisible.value = true;
+              
+              const rect = target.getBoundingClientRect();
+              const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+              const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+              
+              tooltipX.value = rect.left + scrollLeft + (rect.width / 2) - 150;
+              tooltipY.value = rect.top + scrollTop - 190;
+            }
+          }
+        };
+
+        const onCanvasMouseOut = (event) => {
+          const target = event.target.closest('.typo-error');
+          if (target) {
+            startHideTimer();
+          }
+        };
+
+        const onCanvasClick = (event) => {
+          const target = event.target.closest('.typo-error');
+          if (target) {
+            event.stopPropagation();
+            const errorId = target.getAttribute('data-error-id');
+            correctTypo(errorId);
+          }
+        };
+
+        const clearHideTimer = () => {
+          if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+          }
+        };
+
+        const startHideTimer = () => {
+          clearHideTimer();
+          hideTimer = setTimeout(() => {
+            tooltipVisible.value = false;
+          }, 300);
+        };
+
+        // --- 10. Core Correction Flow ---
+        const correctTypo = (errorId) => {
+          if (!activeFile.value) return;
+          
+          const doc = activeFile.value.documentContent;
+          const errorIndex = doc.errors.findIndex(e => e.id === errorId);
+          if (errorIndex === -1) return;
+          
+          const error = doc.errors[errorIndex];
+          const para = doc.paragraphs.find(p => p.id === error.paragraphId);
+          if (!para) return;
+
+          const originalText = para.rawText;
+          const wrongWord = error.wrongWord;
+          const suggestedWord = error.suggestedWord;
+
+          const newText = originalText.substring(0, error.startIndex) + suggestedWord + originalText.substring(error.endIndex);
+          para.rawText = newText;
+
+          if (!activeFile.value.appliedCorrections) {
+            activeFile.value.appliedCorrections = [];
+          }
+          activeFile.value.appliedCorrections.push({
+            paragraphId: error.paragraphId,
+            wrongWord: error.wrongWord,
+            suggestedWord: error.suggestedWord,
+            pageNumber: error.pageNumber || 1,
+            blockId: error.paragraphId,
+            boundingBox: error.boundingBox || [0, 0, 0, 0]
+          });
+
+          doc.errors.splice(errorIndex, 1);
+
+          const hasMore = doc.errors.some(e => e.paragraphId === para.id);
+          if (!hasMore) para.hasError = false;
+
+          const delta = suggestedWord.length - wrongWord.length;
+          doc.errors.forEach(e => {
+            if (e.paragraphId === para.id && e.startIndex > error.startIndex) {
+              e.startIndex += delta;
+              e.endIndex += delta;
+            }
+          });
+
+          addLogEntry('accept', `已修正「${wrongWord}」➔「${suggestedWord}」`, wrongWord, suggestedWord);
+          showToast(`已成功套用修正！`, 'success');
+          
+          tooltipVisible.value = false;
+        };
+
+        const ignoreTypo = (errorId) => {
+          if (!activeFile.value) return;
+
+          const doc = activeFile.value.documentContent;
+          const errorIndex = doc.errors.findIndex(e => e.id === errorId);
+          if (errorIndex === -1) return;
+
+          const error = doc.errors[errorIndex];
+          const para = doc.paragraphs.find(p => p.id === error.paragraphId);
+          if (!para) return;
+
+          const wrongWord = error.wrongWord;
+          doc.errors.splice(errorIndex, 1);
+
+          const hasMore = doc.errors.some(e => e.paragraphId === para.id);
+          if (!hasMore) para.hasError = false;
+
+          addLogEntry('ignore', `忽略修正：保留錯字「${wrongWord}」`);
+          showToast(`已忽略此建議。`, 'info');
+          
+          tooltipVisible.value = false;
+        };
+
+        const correctAllTypos = () => {
+          if (!activeFile.value) {
+            showToast('尚無作用中文件可供修正。', 'error');
+            return;
+          }
+
+          const doc = activeFile.value.documentContent;
+          const totalErrors = [...doc.errors];
+
+          if (totalErrors.length === 0) {
+            showToast('文件中無任何待修正的錯別字。', 'info');
+            return;
+          }
+
+          const errorsByPara = {};
+          totalErrors.forEach(err => {
+            if (!errorsByPara[err.paragraphId]) errorsByPara[err.paragraphId] = [];
+            errorsByPara[err.paragraphId].push(err);
+          });
+
+          Object.keys(errorsByPara).forEach(pId => {
+            const para = doc.paragraphs.find(p => p.id === pId);
+            if (!para) return;
+
+            errorsByPara[pId].sort((a, b) => b.startIndex - a.startIndex);
+
+            let newText = para.rawText;
+            errorsByPara[pId].forEach(err => {
+              newText = newText.substring(0, err.startIndex) + err.suggestedWord + newText.substring(err.endIndex);
+              
+              if (!activeFile.value.appliedCorrections) {
+                activeFile.value.appliedCorrections = [];
+              }
+              activeFile.value.appliedCorrections.push({
+                paragraphId: err.paragraphId,
+                wrongWord: err.wrongWord,
+                suggestedWord: err.suggestedWord,
+                pageNumber: err.pageNumber || 1,
+                blockId: err.paragraphId,
+                boundingBox: err.boundingBox || [0, 0, 0, 0]
+              });
+            });
+            
+            para.rawText = newText;
+            para.hasError = false;
+          });
+
+          doc.errors = [];
+
+          addLogEntry('accept', `一鍵套用：批量修正了全文字面上的所有 ${totalErrors.length} 處疑似錯誤。`);
+          showToast(`已一鍵修正全文字面上所有錯字！`, 'success');
+        };
+
+        // --- 11. API Export Download ---
+        const triggerExport = async (format) => {
+          exportDropdownVisible.value = false;
+          if (!activeFile.value) {
+            showToast('目前無預覽檔案可供匯出。', 'error');
+            return;
+          }
+          
+          if (activeFileErrorsCount.value > 0) {
+            showToast('請修正完所有錯別字後再進行匯出！', 'error');
+            return;
+          }
+
+          const fileId = activeFile.value.id;
+          const corrections = activeFile.value.appliedCorrections || [];
+          
+          showToast(`正在導出檔案「${activeFile.value.name.split('.')[0]}_已校對.${format}」...`, 'info');
+          
+          try {
+            const url = getApiUrl(`/api/export/${format}`);
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                fileId: fileId,
+                corrections: corrections,
+                paragraphs: activeFile.value.documentContent.paragraphs || []
+              })
+            });
+
+            if (!res.ok) throw new Error(`準備下載檔案時發生了問題，請稍後再試一次。`);
+            
+            let downloadFilename = `${activeFile.value.name.split('.')[0]}_已校對.${format}`;
+            const disposition = res.headers.get('Content-Disposition');
+            if (disposition && disposition.includes("filename*=utf-8''")) {
+              const parts = disposition.split("filename*=utf-8''");
+              if (parts.length > 1) {
+                downloadFilename = decodeURIComponent(parts[1]);
+              }
+            }
+
+            const blob = await res.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = downloadFilename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(downloadUrl);
+
+            showToast(`匯出下載成功！`, 'success');
+            addLogEntry('edit', `匯出文件：成功儲存校對後的檔案「${downloadFilename}」。`);
+          } catch (err) {
+            console.error("Export API error, using mockup fallback.", err);
+            
+            // 離線模擬下載 (Fallback)
+            const cleanName = activeFile.value.name.split('.')[0];
+            const fallbackName = `${cleanName}_已校對.${format}`;
+            
+            const link = document.createElement('a');
+            link.href = '#';
+            link.download = fallbackName;
+            showToast(`模擬成功！已完成「${fallbackName}」下載回饋。`, 'success');
+            addLogEntry('edit', `離線模擬下載：成功下載檔案「${fallbackName}」。`);
+          }
+        };
+
+        const deleteFileFromServer = async (fileId) => {
+          if (!confirm("確定要刪除此檔案嗎？此操作將會清除伺服器上的原始快取！")) return;
+          try {
+            const res = await fetch(getApiUrl(`/api/file/${fileId}`), {
+              method: 'DELETE'
+            });
+            if (res.ok) {
+              uploadedFiles.value = uploadedFiles.value.filter(f => f.id !== fileId);
+              showToast("檔案已成功刪除！", "success");
+              addLogEntry("ignore", `已從伺服器刪除檔案，任務 ID: ${fileId}`);
+              
+              if (activeFile.value && activeFile.value.id === fileId) {
+                const remain = uploadedFiles.value.find(f => f.status === 'success');
+                if (remain) {
+                  uploadedFiles.value.forEach(f => f.active = (f.id === remain.id));
+                } else {
+                  uploadedFiles.value.forEach(f => f.active = false);
+                }
+              }
+            } else {
+              throw new Error("移除檔案的動作沒有成功，請重新整理網頁後再試一次。");
+            }
+          } catch (err) {
+            console.error("Delete file API error, fallback to local deletion.", err);
+            uploadedFiles.value = uploadedFiles.value.filter(f => f.id !== fileId);
+            showToast("已從本地移除檔案 (後端已同步清除或離線)", "info");
+            
+            if (activeFile.value && activeFile.value.id === fileId) {
+              const remain = uploadedFiles.value.find(f => f.status === 'success');
+              if (remain) {
+                uploadedFiles.value.forEach(f => f.active = (f.id === remain.id));
+              } else {
+                uploadedFiles.value.forEach(f => f.active = false);
+              }
+            }
+          }
+        };
+
+        const startEditing = (para, event) => {
+          if (event.target.closest('.typo-error')) return;
+          
+          const container = event.target.parentElement;
+          para.isEditing = true;
+          
+          setTimeout(() => {
+            const ta = container.querySelector('textarea');
+            if (ta) ta.focus();
+          }, 50);
+        };
+
+        const finishEditing = (para) => {
+          para.isEditing = false;
+          para.correctedText = para.rawText;
+          addLogEntry("edit", `手動編輯段落的文字內容。`);
+        };
+
+        const triggerRedetect = async (mode = 'all') => {
+          if (!activeFile.value || isRedetecting.value !== false) return;
+          
+          const fileId = activeFile.value.id;
+          const paras = activeFile.value.documentContent.paragraphs
+            .filter(p => !p.type || p.type === 'text')
+            .map(p => ({
+              id: p.id,
+              text: p.rawText
+            }));
+            
+          if (paras.length === 0) {
+            showToast("文件中沒有可校對的文字段落。", "info");
+            return;
+          }
+
+          // 清除舊錯誤
+          activeFile.value.documentContent.errors = [];
+          activeFile.value.documentContent.paragraphs.forEach(p => p.hasError = false);
+          
+          // 分批設定 (每批 5 個段落)
+          const chunkSize = 5;
+          const chunks = [];
+          for (let i = 0; i < paras.length; i += chunkSize) {
+            chunks.push(paras.slice(i, i + chunkSize));
+          }
+          
+          isRedetecting.value = mode;
+          redetectTotal.value = chunks.length;
+          redetectProgress.value = 0;
+          let totalErrorsFound = 0;
+          let remainingLimitMsg = "";
+          
+          showToast(`開始重新校對，共分為 ${chunks.length} 批次...`, "info");
+          addLogEntry("edit", `開始重新偵測，共 ${paras.length} 個段落，分為 ${chunks.length} 批次。`);
+          
+          try {
+            for (let i = 0; i < chunks.length; i++) {
+              redetectProgress.value = i + 1;
+              const currentChunk = chunks[i];
+              
+              redetectAbortController = new AbortController();
+              const res = await fetch(getApiUrl("/api/redetect"), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: redetectAbortController.signal,
+                body: JSON.stringify({
+                  fileId: fileId,
+                  paragraphs: currentChunk,
+                  mode: mode
+                })
+              });
+              
+              if (!res.ok) {
+                if (res.status === 429) {
+                  const errorData = await res.json().catch(() => ({}));
+                  throw new Error(errorData.detail || "本日偵測額度已用盡（每日限制 5 次）。請等待隔天 0 點後再試。");
+                }
+                throw new Error(`重新校對被迫暫停：在檢查第 ${i + 1} 批段落時與 AI 失去了連線，請稍後再試。`);
+              }
+              const data = await res.json();
+              
+              if (data.remainingLimit !== undefined) {
+                remainingLimitMsg = `（今日剩餘偵測次數：${data.remainingLimit} 次）`;
+              }
+              
+              if (data.errors && data.errors.length > 0) {
+                totalErrorsFound += data.errors.length;
+                // 陸續加入新錯誤
+                activeFile.value.documentContent.errors.push(...data.errors);
+                
+                // 標記段落有錯誤 (這會觸發 UI 即時顯示紅框與錯誤 Badge)
+                activeFile.value.documentContent.paragraphs.forEach(p => {
+                  if ((!p.type || p.type === 'text') && data.errors.some(e => e.paragraphId === p.id)) {
+                    p.hasError = true;
+                  }
+                });
+              }
+            }
+            
+            showToast(`重新偵測完成！共找到 ${totalErrorsFound} 處錯字與疑點。${remainingLimitMsg}`, "success");
+            addLogEntry("edit", `重新偵測完成，檢出 ${totalErrorsFound} 個待校對點。${remainingLimitMsg}`);
+          } catch (err) {
+            if (err.name === 'AbortError') {
+              console.log("Redetect aborted by user.");
+              showToast("偵測程序已由使用者中斷。", "info");
+              addLogEntry("ignore", "偵測程序已由使用者中斷。");
+            } else {
+              console.error("Redetect API failed.", err);
+              showToast(`${err.message || '重新偵測暫停：AI 伺服器目前沒有回應，請稍後再試。'}`, "error");
+              addLogEntry("ignore", `重新偵測失敗：${err.message || '伺服器錯誤'}`);
+            }
+          } finally {
+            isRedetecting.value = false;
+            redetectProgress.value = 0;
+            redetectTotal.value = 0;
+          }
+        };
+
+        const cancelRedetect = () => {
+          if (redetectAbortController) {
+            redetectAbortController.abort();
+            redetectAbortController = null;
+          }
+        };
+
+        const deleteParagraph = (paraId) => {
+          if (!activeFile.value) return;
+          if (!confirm("確定要將此區塊從文件中移除嗎？")) return;
+          
+          activeFile.value.documentContent.paragraphs = activeFile.value.documentContent.paragraphs.filter(p => p.id !== paraId);
+          showToast("區塊已成功從編輯區移除！", "success");
+          addLogEntry("ignore", `從排版中移除了元件 [ID: ${paraId}]。`);
+        };
+
+        // --- 12. Initializer ---
+        onMounted(() => {
+          checkBackendConnection();
+          
+          // 定期健康檢查 (5 秒一次)
+          setInterval(checkBackendConnection, 5000);
+
+          // 點擊空白處關閉匯出選單
+          document.addEventListener('click', () => {
+            exportDropdownVisible.value = false;
+          });
+        });
+
+        return {
+          backendConnected,
+          uploadedFiles,
+          changeLogs,
+          isDragging,
+          fileInput,
+          hoveredError,
+          tooltipVisible,
+          tooltipX,
+          tooltipY,
+          exportDropdownVisible,
+          toasts,
+          activeFile,
+          activeFileErrorsCount,
+          changeLogsFiltered,
+          triggerFileSelect,
+          handleFileSelect,
+          handleFileDrop,
+          selectFile,
+          formatBytes,
+          getFileIcon,
+          getStatusClass,
+          getStatusLabel,
+          getLogTypeLabel,
+          getParagraphHTML,
+          getApiUrl,
+          onCanvasMouseOver,
+          onCanvasMouseOut,
+          onCanvasClick,
+          clearHideTimer,
+          startHideTimer,
+          correctTypo,
+          ignoreTypo,
+          correctAllTypos,
+          triggerExport,
+          showToast,
+          isEditMode,
+          cancelRedetect,
+          changeLogsCollapsed,
+          slideOverview,
+          groupedPages,
+          currentPage,
+          scrollToPage,
+          handleOverviewClick,
+          onEditorScroll,
+          deleteFileFromServer,
+          cancelUploadTask: (fileObj) => {
+            fileObj.cancelRequested = true;
+            deleteFileFromServer(fileObj.id);
+          },
+          startEditing,
+          finishEditing,
+          triggerRedetect,
+          deleteParagraph,
+          escapeHTML,
+          isRedetecting,
+          redetectProgress,
+          redetectTotal
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

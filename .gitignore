@@ -1,0 +1,49 @@
+# 環境變數與機密資訊 (Security)
+.env
+.env.*
+!.env.example
+
+# Python 暫存檔與虛擬環境
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# 資料庫與暫存檔案
+*.sqlite3
+data/uploads/*
+data/exports/*
+!data/uploads/.gitkeep
+!data/exports/.gitkeep
+static/extracted_images/*
+!static/extracted_images/.gitkeep
+
+# 系統暫存與編輯器設定
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

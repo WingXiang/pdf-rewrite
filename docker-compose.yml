@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  web-system:
+    build: .
+    container_name: proofreader-system
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      # 將本地 data 資料夾掛載至容器內，實現上傳與匯出檔案的持久化儲存
+      - ./data/uploads:/app/data/uploads
+      - ./data/exports:/app/data/exports
+    deploy:
+      resources:
+        limits:
+          # 限制最大資源佔用，防止本地測試時過載
+          cpus: '2.0'
+          memory: 4G
+    restart: always
