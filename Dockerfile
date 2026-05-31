@@ -31,8 +31,8 @@ COPY . /app
 # 確保快取與掛載資料夾存在
 RUN mkdir -p /app/data/uploads /app/data/exports
 
-# 暴露服務連接埠
-EXPOSE 8080
+# 暴露服務連接埠 (Hugging Face Spaces 規定必須使用 7860)
+EXPOSE 7860
 
 # 使用 Uvicorn 啟動全端服務
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
