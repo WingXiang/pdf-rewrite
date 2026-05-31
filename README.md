@@ -1,3 +1,13 @@
+---
+title: PDF 錯誤偵測器 Backend
+emoji: 📚
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+app_port: 7860
+---
+
 # PDF 錯誤偵測器 (PDF Rewrite)
 
 一個結合 AI 大語言模型與深度光學字元辨識 (OCR) 的智慧文件校對系統。支援上傳 PDF、掃描圖檔與 Word 文件，自動抓出錯別字、排版遺漏與語意不順，並支援原汁原味的 PDF 覆蓋匯出，保留原始文件的背景與排版設計。
