@@ -25,6 +25,16 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           
-          # Add Hugging Face as a remote and force push
+          # Remove large files (PDFs) from the current workspace before deploying
+          find . -name "*.pdf" -type f -delete
+          
+          # Create a fresh git repo to wipe history and avoid 10MB limit on old commits
+          rm -rf .git
+          git init
+          git checkout -b main
+          git add .
+          git commit -m "Deploy to HF Spaces"
+          
+          # Force push the fresh repo to Hugging Face
           git remote add huggingface https://wingxiang:$HF_TOKEN@huggingface.co/spaces/wingxiang/pdf-rewrite-backend
-          git push huggingface main:main -f
+          git push huggingface main -f
