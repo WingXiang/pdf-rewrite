@@ -715,7 +715,7 @@
             return `http://localhost:8000${endpoint}`;
           }
           if (window.location.hostname.includes('github.io')) {
-            return `https://pdf-backend.zeabur.app${endpoint}`;
+            return `http://localhost:8000${endpoint}`;
           }
           // 在 Docker 或整合託管環境下使用相對路徑
           return endpoint;
