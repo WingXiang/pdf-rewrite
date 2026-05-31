@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 在建置階段預先下載繁中 PaddleOCR 輕量化模型，實現啟動免重複下載優化
-RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=True, lang='chinese_cht', show_log=False)"
+# 在建置階段預先下載 EasyOCR 模型，實現啟動免重複下載優化
+RUN python -c "import easyocr; easyocr.Reader(['ch_tra', 'en'])"
 
 # 複製其餘專案程式碼
 COPY . /app
