@@ -31,6 +31,9 @@ jobs:
           # Create a fresh git repo to wipe history and avoid 10MB limit on old commits
           rm -rf .git
           git init
+          git lfs install
+          git lfs track "*.png" "*.jpg" "*.jpeg" "*.pdf"
+          git add .gitattributes
           git checkout -b main
           git add .
           git commit -m "Deploy to HF Spaces"
